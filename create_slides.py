@@ -396,6 +396,47 @@ Only include information that is explicitly stated in the text. Be concise."""
             print(f"    LLM enhancement failed: {e}")
             return None
 
+    def parse_figcaption(self, caption_text, fallback_metadata):
+        """Parse figcaption to extract artwork-specific metadata
+
+        Common formats:
+        - "Artist, Title, Year medium"
+        - "Artist, Title, medium, Year"
+        """
+        result = {}
+
+        if not caption_text:
+            return result
+
+        # Try to parse format: "Artist, Title, Year medium"
+        parts = [p.strip() for p in caption_text.split(',')]
+
+        if len(parts) >= 2:
+            # First part is likely artist name
+            result['artist'] = parts[0]
+
+            # Rest is title + possibly year/medium
+            title_and_more = ', '.join(parts[1:])
+
+            # Try to extract year (4 digits)
+            year_match = re.search(r'\b(1\d{3}|20\d{2})\b', title_and_more)
+            if year_match:
+                result['year'] = year_match.group(1)
+                # Remove year from title
+                title_and_more = title_and_more.replace(year_match.group(0), '').strip()
+
+            # What's left after removing year is likely title + medium
+            # Medium is usually the last word(s) after year
+            remaining = title_and_more.split(',')
+            if remaining:
+                result['title'] = remaining[0].strip()
+                if len(remaining) > 1:
+                    result['medium'] = remaining[-1].strip()
+            else:
+                result['title'] = title_and_more.strip()
+
+        return result
+
     def extract_article_data(self, url):
         """Extract metadata and images from an article"""
         print(f"\nProcessing: {url}")
@@ -450,51 +491,73 @@ Only include information that is explicitly stated in the text. Be concise."""
         # Don't extract blog post author - we want the artist/creator name instead
         # which will be extracted by LLM
 
-        # Find images
+        # Find images with their captions
         images = []
         content_div = soup.find('article') or soup.find('div', class_='entry-content') or soup.body
 
         if content_div:
-            img_tags = content_div.find_all('img')
-            for img in img_tags:
+            # Look for figure elements (which contain img + figcaption)
+            figures = content_div.find_all('figure')
+            for figure in figures:
+                img = figure.find('img')
+                if not img:
+                    continue
+
                 # Check multiple possible image URL attributes (lazy loading support)
                 img_url = img.get('data-original') or img.get('src') or img.get('data-src')
-                if img_url:
-                    img_url = urljoin(url, img_url)
+                if not img_url:
+                    continue
 
-                    # Filter tiny images
-                    if 'icon' in img_url.lower() or 'logo' in img_url.lower():
-                        continue
+                img_url = urljoin(url, img_url)
 
-                    width = img.get('width')
-                    height = img.get('height')
-                    if width and height:
-                        try:
-                            if int(width) < 50 or int(height) < 50:
-                                continue
-                        except:
-                            pass
+                # Filter tiny images
+                if 'icon' in img_url.lower() or 'logo' in img_url.lower():
+                    continue
 
-                    if '-150x150' in img_url or '-300x' in img_url or 'thumbnail' in img_url:
-                        continue
-
-                    # Check if image is accessible and size
+                width = img.get('width')
+                height = img.get('height')
+                if width and height:
                     try:
-                        head = self.session.head(img_url, timeout=5, allow_redirects=True)
-                        content_length = head.headers.get('content-length')
-                        if content_length and int(content_length) < 5000:
+                        if int(width) < 50 or int(height) < 50:
                             continue
                     except:
                         pass
 
-                    images.append(img_url)
+                if '-150x150' in img_url or '-300x' in img_url or 'thumbnail' in img_url:
+                    continue
 
-        # Remove duplicates while preserving order
+                # Check if image is accessible and size
+                try:
+                    head = self.session.head(img_url, timeout=5, allow_redirects=True)
+                    content_length = head.headers.get('content-length')
+                    if content_length and int(content_length) < 5000:
+                        continue
+                except:
+                    pass
+
+                # Extract figcaption
+                figcaption = figure.find('figcaption')
+                caption_text = figcaption.get_text(strip=True) if figcaption else ''
+
+                # Parse figcaption for artwork metadata
+                # Format is usually: "Artist, Title, Year medium"
+                artwork_metadata = self.parse_figcaption(caption_text, metadata)
+
+                images.append({
+                    'url': img_url,
+                    'caption': caption_text,
+                    'artist': artwork_metadata.get('artist', metadata.get('author', 'Unknown')),
+                    'title': artwork_metadata.get('title', metadata.get('title', 'Unknown')),
+                    'year': artwork_metadata.get('year', metadata.get('year', 'Unknown')),
+                    'medium': artwork_metadata.get('medium', metadata.get('medium', 'Unknown'))
+                })
+
+        # Remove duplicates while preserving order (based on URL)
         seen = set()
         unique_images = []
         for img in images:
-            if img not in seen:
-                seen.add(img)
+            if img['url'] not in seen:
+                seen.add(img['url'])
                 unique_images.append(img)
         images = unique_images
 
@@ -556,7 +619,7 @@ Only include information that is explicitly stated in the text. Be concise."""
                 })
 
             # Create slides for each image
-            for idx, img_url in enumerate(images):
+            for idx, img_data in enumerate(images):
                 print(f"  Adding slide {idx + 1}/{len(images)}...")
 
                 # Create slide
@@ -603,7 +666,7 @@ Only include information that is explicitly stated in the text. Be concise."""
                 requests_list.append({
                     'createImage': {
                         'objectId': image_id,
-                        'url': img_url,
+                        'url': img_data['url'],
                         'elementProperties': {
                             'pageObjectId': slide_id,
                             'size': {
@@ -622,19 +685,20 @@ Only include information that is explicitly stated in the text. Be concise."""
                 })
 
                 # Add caption text box (aligned to bottom of slide)
+                # Use per-image metadata (from figcaption) instead of article-level metadata
                 textbox_id = f'textbox_{idx}'
                 caption_parts = []
-                if metadata['author'] and metadata['author'] != 'Unknown':
-                    caption_parts.append(metadata['author'])
-                if metadata['title'] and metadata['title'] != 'Unknown':
-                    caption_parts.append(metadata['title'])
+                if img_data['artist'] and img_data['artist'] != 'Unknown':
+                    caption_parts.append(img_data['artist'])
+                if img_data['title'] and img_data['title'] != 'Unknown':
+                    caption_parts.append(img_data['title'])
 
                 # Combine medium and year on same line if both exist
                 meta_line = []
-                if metadata['medium'] and metadata['medium'] != 'Unknown':
-                    meta_line.append(metadata['medium'])
-                if metadata['year'] and metadata['year'] != 'Unknown':
-                    meta_line.append(metadata['year'])
+                if img_data['medium'] and img_data['medium'] != 'Unknown':
+                    meta_line.append(img_data['medium'])
+                if img_data['year'] and img_data['year'] != 'Unknown':
+                    meta_line.append(img_data['year'])
                 if meta_line:
                     caption_parts.append(', '.join(meta_line))
 
