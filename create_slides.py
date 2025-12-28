@@ -299,8 +299,10 @@ class SocksStudioSlidesCreator:
                 # Slide: 10" x 5.625" (9144000 x 5143500 EMU) - Widescreen 16:9
                 # Reserve 0.6" for caption at bottom
                 # Available height: 5.625" - 0.6" = 5.025"
-                # Image constrained in 5.025" x 5.025" square (4594860 x 4594860 EMU)
-                # Centered horizontally: (10" - 5.025") / 2 = 2.4875" = 2274570 EMU
+                # Image box: 9" wide x 5.025" tall (allows landscape images to extend)
+                # Portrait images will be constrained by height and centered within
+                # Landscape images will use more width with height at 5.025"
+                # Centered horizontally: (10" - 9") / 2 = 0.5" = 457200 EMU
                 image_id = f'image_{idx}'
                 requests_list.append({
                     'createImage': {
@@ -309,14 +311,14 @@ class SocksStudioSlidesCreator:
                         'elementProperties': {
                             'pageObjectId': slide_id,
                             'size': {
-                                'width': {'magnitude': 4594860, 'unit': 'EMU'},   # 5.025" square constraint
-                                'height': {'magnitude': 4594860, 'unit': 'EMU'}   # 5.025" square constraint
+                                'width': {'magnitude': 8229600, 'unit': 'EMU'},   # 9" wide (allows landscape)
+                                'height': {'magnitude': 4594860, 'unit': 'EMU'}   # 5.025" height constraint
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
-                                'translateX': 2274570,  # Center horizontally
-                                'translateY': 0,        # Top of slide (no spacing)
+                                'translateX': 457200,  # Center horizontally: 0.5" from edge
+                                'translateY': 0,       # Top of slide (no spacing)
                                 'unit': 'EMU'
                             }
                         }
