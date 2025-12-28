@@ -1,0 +1,13 @@
+# Virtual environment
+venv/
+__pycache__/
+*.pyc
+
+# Output directories
+socks_studio_images/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
