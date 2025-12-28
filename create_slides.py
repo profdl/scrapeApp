@@ -23,7 +23,7 @@ import pickle
 
 # Google API scopes
 SCOPES = ['https://www.googleapis.com/auth/presentations',
-          'https://www.googleapis.com/auth/drive.file']
+          'https://www.googleapis.com/auth/drive']
 
 class SocksStudioSlidesCreator:
     def __init__(self):
@@ -37,6 +37,7 @@ class SocksStudioSlidesCreator:
         self.credentials_path = Path('credentials.json')
         self.token_path = Path('token.pickle')
         self.anthropic_key_path = Path('anthropic_api_key.txt')
+        self.drive_folder_id = None  # Will be set after authentication
 
         # Initialize Anthropic client for metadata enhancement
         # Try to read from file first, then fall back to environment variable
@@ -91,6 +92,55 @@ class SocksStudioSlidesCreator:
         self.slides_service = build('slides', 'v1', credentials=creds)
         self.drive_service = build('drive', 'v3', credentials=creds)
         print("✓ Authentication successful!")
+
+    def get_or_create_drive_folder(self, folder_name='socks-studio'):
+        """Get or create a Google Drive folder for presentations"""
+        # Search for existing folder
+        query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+        results = self.drive_service.files().list(
+            q=query,
+            spaces='drive',
+            fields='files(id, name)'
+        ).execute()
+
+        folders = results.get('files', [])
+
+        if folders:
+            folder_id = folders[0]['id']
+            print(f"✓ Found existing folder: '{folder_name}' (ID: {folder_id})")
+        else:
+            # Create new folder
+            folder_metadata = {
+                'name': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder'
+            }
+            folder = self.drive_service.files().create(
+                body=folder_metadata,
+                fields='id, name'
+            ).execute()
+            folder_id = folder['id']
+            print(f"✓ Created new folder: '{folder_name}' (ID: {folder_id})")
+
+        self.drive_folder_id = folder_id
+        return folder_id
+
+    def move_presentation_to_folder(self, presentation_id, folder_id):
+        """Move a presentation into a specific Drive folder"""
+        # Get current parents
+        file = self.drive_service.files().get(
+            fileId=presentation_id,
+            fields='parents'
+        ).execute()
+
+        previous_parents = ','.join(file.get('parents', []))
+
+        # Move to new folder
+        self.drive_service.files().update(
+            fileId=presentation_id,
+            addParents=folder_id,
+            removeParents=previous_parents,
+            fields='id, parents'
+        ).execute()
 
     def get_article_urls(self, limit=None):
         """Get article URLs from the homepage (most recent first)"""
@@ -656,6 +706,12 @@ Only include information that is explicitly stated in the text. Be concise."""
         # Authenticate
         self.authenticate()
 
+        # Get or create Drive folder
+        print("\nSetting up Drive folder...")
+        folder_id = self.get_or_create_drive_folder('socks-studio')
+        folder_url = f"https://drive.google.com/drive/folders/{folder_id}"
+        print(f"Folder URL: {folder_url}")
+
         # Get article URLs (most recent first)
         print("\nFetching article list...")
         article_urls = self.get_article_urls(limit=count)
@@ -679,6 +735,10 @@ Only include information that is explicitly stated in the text. Be concise."""
             presentation_id = self.create_presentation(article_data)
 
             if presentation_id:
+                # Move to folder
+                print("  Moving to 'socks-studio' folder...")
+                self.move_presentation_to_folder(presentation_id, folder_id)
+
                 presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}"
                 created_presentations.append({
                     'title': article_data['metadata']['title'],
@@ -697,6 +757,9 @@ Only include information that is explicitly stated in the text. Be concise."""
         # Summary
         print(f"\n{'='*60}")
         print(f"Batch Complete! Created {len(created_presentations)} presentation(s)")
+        print(f"{'='*60}")
+        print(f"All presentations saved to folder:")
+        print(f"  {folder_url}")
         print(f"{'='*60}")
         for i, pres in enumerate(created_presentations, 1):
             print(f"{i}. {pres['title']} ({pres['slides']} slides)")
