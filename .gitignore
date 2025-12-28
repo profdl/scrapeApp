@@ -9,5 +9,9 @@ socks_studio_images/
 # Logs
 *.log
 
+# Google API credentials
+credentials.json
+token.pickle
+
 # OS files
 .DS_Store
