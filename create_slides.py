@@ -868,18 +868,37 @@ Only include information that is explicitly stated in the text. Be concise."""
         print(f"Catalog URL: {catalog_url}")
 
         # Get article URLs (most recent first)
-        print("\nFetching article list...")
-        all_article_urls = self.get_article_urls(limit=None)  # Get all to check processed
+        # Fetch incrementally until we have enough unprocessed articles
+        print("\nFetching article URLs...")
+        article_urls = []
+        fetched_count = 0
+        skipped_already_processed = 0
+        batch_size = 50  # Fetch in batches of 50
 
-        # Filter out already processed articles
-        unprocessed_urls = [url for url in all_article_urls if not self.is_article_processed(url)]
+        while len(article_urls) < count:
+            # Fetch next batch
+            fetch_limit = fetched_count + batch_size
+            all_urls = self.get_article_urls(limit=fetch_limit)
 
-        # Limit to requested count
-        article_urls = unprocessed_urls[:count] if count else unprocessed_urls
+            # Check if we've fetched all available articles
+            if len(all_urls) == fetched_count:
+                print(f"Reached end of available articles")
+                break
 
-        already_processed_count = len(all_article_urls) - len(unprocessed_urls)
-        print(f"Total articles: {len(all_article_urls)}")
-        print(f"Already processed: {already_processed_count}")
+            # Process newly fetched URLs
+            new_urls = all_urls[fetched_count:]
+            for url in new_urls:
+                if not self.is_article_processed(url):
+                    article_urls.append(url)
+                    if len(article_urls) >= count:
+                        break
+                else:
+                    skipped_already_processed += 1
+
+            fetched_count = len(all_urls)
+            print(f"  Fetched {fetched_count} articles, found {len(article_urls)} unprocessed...")
+
+        print(f"Already processed: {skipped_already_processed}")
         print(f"Will process: {len(article_urls)} new article(s)")
 
         # Process articles
