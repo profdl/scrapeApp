@@ -454,7 +454,8 @@ Only include information that is explicitly stated in the text. Be concise."""
         if content_div:
             img_tags = content_div.find_all('img')
             for img in img_tags:
-                img_url = img.get('src') or img.get('data-src')
+                # Check multiple possible image URL attributes (lazy loading support)
+                img_url = img.get('data-original') or img.get('src') or img.get('data-src')
                 if img_url:
                     img_url = urljoin(url, img_url)
 
@@ -476,7 +477,7 @@ Only include information that is explicitly stated in the text. Be concise."""
 
                     # Check if image is accessible and size
                     try:
-                        head = self.session.head(img_url, timeout=5)
+                        head = self.session.head(img_url, timeout=5, allow_redirects=True)
                         content_length = head.headers.get('content-length')
                         if content_length and int(content_length) < 5000:
                             continue
