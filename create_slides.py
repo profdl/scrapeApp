@@ -29,8 +29,17 @@ SCOPES = ['https://www.googleapis.com/auth/presentations',
           'https://www.googleapis.com/auth/spreadsheets']
 
 class SocksStudioSlidesCreator:
-    def __init__(self):
-        self.base_url = "https://socks-studio.com"
+    def __init__(self, site='socks-studio'):
+        self.site = site  # 'socks-studio' or 'public-domain-review'
+
+        # Set base URL based on site
+        if self.site == 'socks-studio':
+            self.base_url = "https://socks-studio.com"
+        elif self.site == 'public-domain-review':
+            self.base_url = "https://publicdomainreview.org"
+        else:
+            raise ValueError(f"Unknown site: {site}")
+
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
@@ -41,7 +50,7 @@ class SocksStudioSlidesCreator:
         self.credentials_path = Path('credentials.json')
         self.token_path = Path('token.pickle')
         self.anthropic_key_path = Path('anthropic_api_key.txt')
-        self.tracking_file = Path('processed_articles.json')
+        self.tracking_file = Path(f'processed_articles_{self.site}.json')
         self.drive_folder_id = None  # Will be set after authentication
         self.catalog_sheet_id = None  # Will be set after creating/finding catalog
 
@@ -100,8 +109,11 @@ class SocksStudioSlidesCreator:
         self.sheets_service = build('sheets', 'v4', credentials=creds)
         print("✓ Authentication successful!")
 
-    def get_or_create_drive_folder(self, folder_name='socks-studio'):
+    def get_or_create_drive_folder(self, folder_name=None):
         """Get or create a Google Drive folder for presentations"""
+        if folder_name is None:
+            folder_name = self.site
+
         # Search for existing folder
         query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
         results = self.drive_service.files().list(
@@ -180,8 +192,11 @@ class SocksStudioSlidesCreator:
 
     def get_or_create_catalog_sheet(self):
         """Get or create a Google Sheets catalog for all presentations"""
+        # Create site-specific catalog name
+        catalog_name = f"{self.site.replace('-', ' ').title()} Presentations Catalog"
+
         # Search for existing catalog
-        query = "name='Socks Studio Presentations Catalog' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+        query = f"name='{catalog_name}' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
         results = self.drive_service.files().list(
             q=query,
             spaces='drive',
@@ -199,7 +214,7 @@ class SocksStudioSlidesCreator:
             # Create new spreadsheet
             spreadsheet = {
                 'properties': {
-                    'title': 'Socks Studio Presentations Catalog'
+                    'title': catalog_name
                 },
                 'sheets': [{
                     'properties': {
@@ -281,9 +296,9 @@ class SocksStudioSlidesCreator:
             body={'values': row}
         ).execute()
 
-    def get_article_urls(self, limit=None):
-        """Get article URLs from the homepage (most recent first)"""
-        print("Fetching article URLs...")
+    def _get_socks_studio_urls(self, limit=None):
+        """Get article URLs from Socks Studio homepage (most recent first)"""
+        print("Fetching Socks Studio article URLs...")
         article_urls = []
 
         page = 1
@@ -324,6 +339,53 @@ class SocksStudioSlidesCreator:
             time.sleep(0.5)
 
         return article_urls
+
+    def _get_public_domain_urls(self, limit=None):
+        """Get collection URLs from Public Domain Review image collections"""
+        print("Fetching Public Domain Review collection URLs...")
+        collection_urls = []
+
+        # PDR has 23 pages of image collections, 24 per page
+        max_pages = 23
+        for page in range(1, max_pages + 1):
+            url = f"{self.base_url}/collections/images/{page}/"
+
+            try:
+                response = self.session.get(url, timeout=10)
+                response.raise_for_status()
+            except Exception as e:
+                print(f"Error fetching page {page}: {e}")
+                break
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Find collection links: <a href="/collection/[slug]/">
+            links = soup.find_all('a', href=re.compile(r'^/collection/[^/]+/$'))
+
+            if not links:
+                break
+
+            for link in links:
+                href = link.get('href')
+                if href:
+                    collection_url = urljoin(self.base_url, href)
+                    if collection_url not in collection_urls:
+                        collection_urls.append(collection_url)
+                        if limit and len(collection_urls) >= limit:
+                            return collection_urls
+
+            time.sleep(0.5)
+
+        return collection_urls
+
+    def get_article_urls(self, limit=None):
+        """Get article/collection URLs (dispatches to site-specific method)"""
+        if self.site == 'socks-studio':
+            return self._get_socks_studio_urls(limit)
+        elif self.site == 'public-domain-review':
+            return self._get_public_domain_urls(limit)
+        else:
+            raise ValueError(f"Unknown site: {self.site}")
 
     def enhance_metadata_with_llm(self, soup, existing_metadata):
         """Use Claude to extract missing date/medium and keywords from article text"""
@@ -437,8 +499,8 @@ Only include information that is explicitly stated in the text. Be concise."""
 
         return result
 
-    def extract_article_data(self, url):
-        """Extract metadata and images from an article"""
+    def _extract_socks_studio_data(self, url):
+        """Extract metadata and images from a Socks Studio article"""
         print(f"\nProcessing: {url}")
 
         try:
@@ -543,13 +605,19 @@ Only include information that is explicitly stated in the text. Be concise."""
                 # Format is usually: "Artist, Title, Year medium"
                 artwork_metadata = self.parse_figcaption(caption_text, metadata)
 
+                # Use collection-level metadata as fallback when per-image data is missing
+                artist = artwork_metadata.get('artist') if artwork_metadata.get('artist') and artwork_metadata.get('artist') != 'Unknown' else metadata.get('author', 'Unknown')
+                title = artwork_metadata.get('title') if artwork_metadata.get('title') and artwork_metadata.get('title') != 'Unknown' else metadata.get('title', 'Unknown')
+                year = artwork_metadata.get('year') if artwork_metadata.get('year') and artwork_metadata.get('year') != 'Unknown' else metadata.get('year', 'Unknown')
+                medium = artwork_metadata.get('medium') if artwork_metadata.get('medium') and artwork_metadata.get('medium') != 'Unknown' else metadata.get('medium', 'Unknown')
+
                 images.append({
                     'url': img_url,
                     'caption': caption_text,
-                    'artist': artwork_metadata.get('artist', metadata.get('author', 'Unknown')),
-                    'title': artwork_metadata.get('title', metadata.get('title', 'Unknown')),
-                    'year': artwork_metadata.get('year', metadata.get('year', 'Unknown')),
-                    'medium': artwork_metadata.get('medium', metadata.get('medium', 'Unknown'))
+                    'artist': artist,
+                    'title': title,
+                    'year': year,
+                    'medium': medium
                 })
 
         # Remove duplicates while preserving order (based on URL)
@@ -581,10 +649,193 @@ Only include information that is explicitly stated in the text. Be concise."""
                     metadata['keywords'] = enhanced_metadata['keywords']
                     print(f"    Found keywords: {metadata['keywords']}")
 
+            # Update image data with enhanced metadata
+            for img in images:
+                if img['artist'] == 'Unknown' and metadata.get('author') != 'Unknown':
+                    img['artist'] = metadata['author']
+                if img['medium'] == 'Unknown' and metadata.get('medium') != 'Unknown':
+                    img['medium'] = metadata['medium']
+                if img['year'] == 'Unknown' and metadata.get('year') != 'Unknown':
+                    img['year'] = metadata['year']
+
         return {
             'metadata': metadata,
             'images': images
         }
+
+    def _extract_public_domain_data(self, url):
+        """Extract metadata and images from a Public Domain Review collection"""
+        print(f"\nProcessing collection: {url}")
+
+        try:
+            response = self.session.get(url, timeout=10)
+            response.raise_for_status()
+        except Exception as e:
+            print(f"Error fetching collection: {e}")
+            return None
+
+        soup = BeautifulSoup(response.text, 'html.parser')
+
+        # Extract metadata
+        metadata = {
+            'author': 'Unknown',  # Curator
+            'title': 'Unknown',
+            'year': 'Unknown',
+            'medium': 'Unknown',
+            'article_url': url
+        }
+
+        # Try JSON-LD schema first
+        json_ld_scripts = soup.find_all('script', type='application/ld+json')
+        for script in json_ld_scripts:
+            try:
+                data = json.loads(script.string)
+                if isinstance(data, dict):
+                    if 'headline' in data:
+                        metadata['title'] = data['headline']
+                    elif 'name' in data:
+                        metadata['title'] = data['name']
+                    if 'author' in data:
+                        if isinstance(data['author'], dict):
+                            metadata['author'] = data['author'].get('name', 'Unknown')
+                        elif isinstance(data['author'], list) and len(data['author']) > 0:
+                            if isinstance(data['author'][0], dict):
+                                metadata['author'] = data['author'][0].get('name', 'Unknown')
+            except:
+                pass
+
+        # Fallback to HTML parsing for title
+        if metadata['title'] == 'Unknown':
+            # Try article title or h1
+            title_tag = soup.find('h1', class_='collection__title') or soup.find('h1')
+            if title_tag:
+                metadata['title'] = title_tag.get_text(strip=True)
+
+        # Extract artist from title (patterns like "Artist's Works" or "Title: Artist's Works")
+        if metadata['author'] == 'Unknown' and metadata['title'] != 'Unknown':
+            # Pattern 1: Look for "Name's" possessive pattern
+            # Match any sequence of words (including accented chars) followed by 's
+            # Handle both straight (') and curly (') apostrophes
+            possessive_match = re.search(r"([A-ZÀ-ÿ][A-Za-zÀ-ÿ\s]+)['\u2019]s\s+", metadata['title'])
+            if possessive_match:
+                # Get the name before "'s"
+                potential_artist = possessive_match.group(1).strip()
+                metadata['author'] = potential_artist
+            else:
+                # Pattern 2: Try to extract name before parentheses
+                # E.g., "Artist Name (dates)" -> "Artist Name"
+                before_paren = metadata['title'].split('(')[0].strip()
+                # If it looks like a name (2-4 words, not too long)
+                words = before_paren.split()
+                if 2 <= len(words) <= 4 and len(before_paren) < 50:
+                    metadata['author'] = before_paren
+
+        # Extract year from title (often in format "Title (ca. 1920s)" or "Title (1985)")
+        if '(' in metadata['title'] and ')' in metadata['title']:
+            year_match = re.search(r'\(([^\)]*\d{4}[^\)]*)\)', metadata['title'])
+            if year_match:
+                metadata['year'] = year_match.group(1)
+
+        # Find all images in the collection
+        images = []
+
+        # PDR uses a gallery structure: <div class="collection__gallery">
+        gallery = soup.find('div', class_='collection__gallery')
+
+        if gallery:
+            # Find all img tags within the gallery
+            img_tags = gallery.find_all('img')
+
+            for img in img_tags:
+                # Get image URL
+                img_url = img.get('src') or img.get('data-src')
+                if not img_url:
+                    continue
+
+                img_url = urljoin(url, img_url)
+
+                # Filter tiny images
+                if 'icon' in img_url.lower() or 'logo' in img_url.lower():
+                    continue
+
+                # Skip if URL contains width parameter < 200px
+                if 'width=' in img_url and re.search(r'width=(\d+)', img_url):
+                    width_match = re.search(r'width=(\d+)', img_url)
+                    if width_match and int(width_match.group(1)) < 200:
+                        continue
+
+                # Try to find caption in parent button or nearby elements
+                # PDR structure: <button class="collection__gallery__image">
+                caption_text = ''
+                button = img.find_parent('button', class_='collection__gallery__image')
+                if button:
+                    # Look for aria-label or title attribute
+                    caption_text = button.get('aria-label', '') or button.get('title', '')
+
+                # If no caption found, try to extract from image alt text
+                if not caption_text:
+                    caption_text = img.get('alt', '')
+
+                # Parse caption for artist, title, year
+                artwork_metadata = self.parse_figcaption(caption_text, metadata)
+
+                # For PDR, use collection-level metadata as fallback
+                # since individual images don't have detailed captions
+                artist = artwork_metadata.get('artist') if artwork_metadata.get('artist') and artwork_metadata.get('artist') != 'Unknown' else metadata.get('author', 'Unknown')
+                title = artwork_metadata.get('title') if artwork_metadata.get('title') and artwork_metadata.get('title') != 'Unknown' else metadata.get('title', '')
+                year = artwork_metadata.get('year') if artwork_metadata.get('year') and artwork_metadata.get('year') != 'Unknown' else metadata.get('year', 'Unknown')
+                medium = artwork_metadata.get('medium') if artwork_metadata.get('medium') and artwork_metadata.get('medium') != 'Unknown' else metadata.get('medium', 'Unknown')
+
+                images.append({
+                    'url': img_url,
+                    'caption': caption_text,
+                    'artist': artist,
+                    'title': title,
+                    'year': year,
+                    'medium': medium
+                })
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_images = []
+        for img in images:
+            if img['url'] not in seen:
+                seen.add(img['url'])
+                unique_images.append(img)
+        images = unique_images
+
+        print(f"Found {len(images)} images")
+
+        # Set medium to 'Images' for PDR collections
+        if metadata['medium'] == 'Unknown':
+            metadata['medium'] = 'Images'
+
+        # Use LLM for keywords extraction if available
+        if self.anthropic_client and 'keywords' not in metadata:
+            print("  Extracting keywords with LLM...")
+            enhanced_metadata = self.enhance_metadata_with_llm(soup, metadata)
+            if enhanced_metadata and enhanced_metadata.get('keywords'):
+                metadata['keywords'] = enhanced_metadata['keywords']
+                print(f"    Found keywords: {metadata['keywords']}")
+
+        # Update image data with finalized metadata
+        for img in images:
+            if img['medium'] == 'Unknown' and metadata.get('medium') != 'Unknown':
+                img['medium'] = metadata['medium']
+
+        return {
+            'metadata': metadata,
+            'images': images
+        }
+
+    def extract_article_data(self, url):
+        """Extract metadata and images (dispatches to site-specific method)"""
+        if self.site == 'socks-studio':
+            return self._extract_socks_studio_data(url)
+        elif self.site == 'public-domain-review':
+            return self._extract_public_domain_data(url)
+        else:
+            raise ValueError(f"Unknown site: {self.site}")
 
     def create_presentation(self, article_data):
         """Create a Google Slides presentation for an article"""
@@ -926,10 +1177,62 @@ Only include information that is explicitly stated in the text. Be concise."""
         print(f"{'='*60}")
 
 
+    def process_article(self, url):
+        """Process a single article/collection and return results
+
+        This method is designed for Streamlit interruptibility - it processes
+        one article/collection at a time and returns structured data.
+
+        Args:
+            url: Article or collection URL to process
+
+        Returns:
+            dict with presentation data, or raises Exception on error
+        """
+        # Extract article data
+        article_data = self.extract_article_data(url)
+
+        if not article_data or not article_data['images']:
+            raise Exception(f"No images found at {url}")
+
+        # Create presentation
+        presentation_id = self.create_presentation(article_data)
+
+        if not presentation_id:
+            raise Exception(f"Failed to create presentation for {url}")
+
+        # Move to folder
+        if self.drive_folder_id:
+            self.move_presentation_to_folder(presentation_id, self.drive_folder_id)
+
+        presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}"
+
+        # Prepare presentation data for tracking/catalog
+        presentation_data = {
+            'presentation_id': presentation_id,
+            'presentation_url': presentation_url,
+            'title': article_data['metadata']['title'],
+            'author': article_data['metadata'].get('author', 'Unknown'),
+            'year': article_data['metadata'].get('year', 'Unknown'),
+            'medium': article_data['metadata'].get('medium', 'Unknown'),
+            'keywords': article_data['metadata'].get('keywords', ''),
+            'slide_count': len(article_data['images']),
+            'processed_date': datetime.now().isoformat()
+        }
+
+        # Save to tracking file
+        self.save_processed_article(url, presentation_data)
+
+        # Add to catalog spreadsheet
+        if self.catalog_sheet_id:
+            self.add_to_catalog(url, presentation_data)
+
+        return presentation_data
+
     def run_batch(self, count=1):
         """Run in batch mode - process N articles without prompting"""
         print("="*60)
-        print("Socks Studio → Google Slides Creator (Batch Mode)")
+        print(f"{self.site.replace('-', ' ').title()} → Google Slides Creator (Batch Mode)")
         print("="*60)
 
         # Authenticate
@@ -937,7 +1240,7 @@ Only include information that is explicitly stated in the text. Be concise."""
 
         # Get or create Drive folder
         print("\nSetting up Drive folder...")
-        folder_id = self.get_or_create_drive_folder('socks-studio')
+        folder_id = self.get_or_create_drive_folder()
         folder_url = f"https://drive.google.com/drive/folders/{folder_id}"
         print(f"Folder URL: {folder_url}")
 
@@ -989,57 +1292,23 @@ Only include information that is explicitly stated in the text. Be concise."""
             print(f"Article {i}/{len(article_urls)}")
             print(f"{'='*60}")
 
-            # Extract article data
-            article_data = self.extract_article_data(article_url)
-
-            if not article_data or not article_data['images']:
-                print("Skipping (no valid images)")
-                skipped_count += 1
-                continue
-
-            # Create presentation
-            presentation_id = self.create_presentation(article_data)
-
-            if presentation_id:
-                # Move to folder
-                print("  Moving to 'socks-studio' folder...")
-                self.move_presentation_to_folder(presentation_id, folder_id)
-
-                presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}"
-
-                # Prepare presentation data for tracking/catalog
-                presentation_data = {
-                    'presentation_id': presentation_id,
-                    'presentation_url': presentation_url,
-                    'title': article_data['metadata']['title'],
-                    'author': article_data['metadata'].get('author', 'Unknown'),
-                    'year': article_data['metadata'].get('year', 'Unknown'),
-                    'medium': article_data['metadata'].get('medium', 'Unknown'),
-                    'keywords': article_data['metadata'].get('keywords', ''),
-                    'slide_count': len(article_data['images']),
-                    'processed_date': datetime.now().isoformat()
-                }
-
-                # Save to tracking file
-                print("  Saving to tracking file...")
-                self.save_processed_article(article_url, presentation_data)
-
-                # Add to catalog spreadsheet
-                print("  Adding to catalog spreadsheet...")
-                self.add_to_catalog(article_url, presentation_data)
+            try:
+                presentation_data = self.process_article(article_url)
 
                 created_presentations.append({
-                    'title': article_data['metadata']['title'],
-                    'url': presentation_url,
-                    'slides': len(article_data['images']),
-                    'keywords': article_data['metadata'].get('keywords', '')
+                    'title': presentation_data['title'],
+                    'url': presentation_data['presentation_url'],
+                    'slides': presentation_data['slide_count'],
+                    'keywords': presentation_data.get('keywords', '')
                 })
+
                 print(f"\n{'='*60}")
                 print("Presentation created successfully!")
-                print(f"View at: {presentation_url}")
+                print(f"View at: {presentation_data['presentation_url']}")
                 print(f"{'='*60}")
-            else:
-                print("Failed to create presentation")
+
+            except Exception as e:
+                print(f"Error processing article: {e}")
                 skipped_count += 1
 
             time.sleep(1)  # Be respectful to APIs
@@ -1065,19 +1334,26 @@ Only include information that is explicitly stated in the text. Be concise."""
 
 
 if __name__ == "__main__":
-    import sys
+    import argparse
 
-    creator = SocksStudioSlidesCreator()
+    parser = argparse.ArgumentParser(
+        description='Create Google Slides presentations from web articles/collections'
+    )
+    parser.add_argument(
+        'count',
+        type=int,
+        nargs='?',
+        default=10,
+        help='Number of articles/collections to process (default: 10)'
+    )
+    parser.add_argument(
+        '--site',
+        choices=['socks-studio', 'public-domain-review'],
+        default='socks-studio',
+        help='Website to scrape (default: socks-studio)'
+    )
 
-    # Check for command-line arguments
-    if len(sys.argv) > 1:
-        try:
-            count = int(sys.argv[1])
-            creator.run_batch(count=count)
-        except ValueError:
-            print("Usage: python create_slides.py [number_of_articles]")
-            print("Example: python create_slides.py 5")
-            sys.exit(1)
-    else:
-        # Default to batch mode with 1 article
-        creator.run_batch(count=1)
+    args = parser.parse_args()
+
+    creator = SocksStudioSlidesCreator(site=args.site)
+    creator.run_batch(count=args.count)
