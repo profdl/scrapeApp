@@ -12,21 +12,34 @@ When processing an article, if the year or medium is not found in the structured
 
 ## Setup
 
-To enable LLM metadata enhancement, set your Anthropic API key as an environment variable:
+### Option 1: API Key File (Recommended - Easiest!)
+
+1. Get your API key from: https://console.anthropic.com/
+2. Create a file named `anthropic_api_key.txt` in the project directory
+3. Paste your API key into the file (just the key, nothing else)
 
 ```bash
-export ANTHROPIC_API_KEY='your-api-key-here'
+echo "sk-ant-your-actual-key-here" > anthropic_api_key.txt
 ```
 
-You can get an API key from: https://console.anthropic.com/
+That's it! The script will automatically read the key from this file.
+
+**Note:** The `.gitignore` file is already configured to exclude `anthropic_api_key.txt` from version control, so your key stays private.
+
+### Option 2: Environment Variable
+
+Alternatively, you can set an environment variable:
+
+```bash
+export ANTHROPIC_API_KEY='sk-ant-your-actual-key-here'
+```
 
 ## Usage
 
-Once the API key is set, the enhancement happens automatically:
+Once the API key is configured (via file or environment variable), the enhancement happens automatically:
 
 ```bash
 source venv/bin/activate
-export ANTHROPIC_API_KEY='your-api-key-here'
 python create_slides.py
 ```
 
@@ -47,4 +60,4 @@ This feature uses Claude 3.5 Haiku, which is very cost-effective:
 
 ## Without API key
 
-If no API key is set, the script works normally but won't enhance missing metadata - captions will show "Unknown" for missing year/medium fields.
+If no API key is provided (no file and no environment variable), the script works normally but won't enhance missing metadata - captions will show "Unknown" for missing year/medium fields instead.

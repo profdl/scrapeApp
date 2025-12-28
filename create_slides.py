@@ -36,9 +36,16 @@ class SocksStudioSlidesCreator:
         self.drive_service = None
         self.credentials_path = Path('credentials.json')
         self.token_path = Path('token.pickle')
+        self.anthropic_key_path = Path('anthropic_api_key.txt')
 
         # Initialize Anthropic client for metadata enhancement
-        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        # Try to read from file first, then fall back to environment variable
+        api_key = None
+        if self.anthropic_key_path.exists():
+            api_key = self.anthropic_key_path.read_text().strip()
+        else:
+            api_key = os.environ.get('ANTHROPIC_API_KEY')
+
         self.anthropic_client = Anthropic(api_key=api_key) if api_key else None
 
     def authenticate(self):
