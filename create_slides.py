@@ -296,9 +296,11 @@ class SocksStudioSlidesCreator:
                 })
 
                 # Add image centered at top (no spacing)
-                # Slide: 10" x 7.5" (9144000 x 6858000 EMU)
-                # Image constrained in 6.9" x 6.9" square (6309360 x 6309360 EMU)
-                # Centered horizontally: (10" - 6.9") / 2 = 1.55" = 1417320 EMU
+                # Slide: 10" x 5.625" (9144000 x 5143500 EMU) - Widescreen 16:9
+                # Reserve 0.6" for caption at bottom
+                # Available height: 5.625" - 0.6" = 5.025"
+                # Image constrained in 5.025" x 5.025" square (4594860 x 4594860 EMU)
+                # Centered horizontally: (10" - 5.025") / 2 = 2.4875" = 2274570 EMU
                 image_id = f'image_{idx}'
                 requests_list.append({
                     'createImage': {
@@ -307,13 +309,13 @@ class SocksStudioSlidesCreator:
                         'elementProperties': {
                             'pageObjectId': slide_id,
                             'size': {
-                                'width': {'magnitude': 6309360, 'unit': 'EMU'},   # 6.9" square constraint
-                                'height': {'magnitude': 6309360, 'unit': 'EMU'}   # 6.9" square constraint
+                                'width': {'magnitude': 4594860, 'unit': 'EMU'},   # 5.025" square constraint
+                                'height': {'magnitude': 4594860, 'unit': 'EMU'}   # 5.025" square constraint
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
-                                'translateX': 1417320,  # Center horizontally
+                                'translateX': 2274570,  # Center horizontally
                                 'translateY': 0,        # Top of slide (no spacing)
                                 'unit': 'EMU'
                             }
@@ -341,7 +343,7 @@ class SocksStudioSlidesCreator:
                 caption_text = '\n'.join(caption_parts) if caption_parts else 'Untitled'
 
                 # Caption box directly below image (no spacing)
-                # Position Y: 6.9" (directly after image) = 6309360 EMU
+                # Position Y: 5.025" (directly after image) = 4594860 EMU
                 # Width: 7.5" (leave room for link on right)
                 # Height: 0.6" (548640 EMU)
                 requests_list.append({
@@ -358,7 +360,7 @@ class SocksStudioSlidesCreator:
                                 'scaleX': 1,
                                 'scaleY': 1,
                                 'translateX': 0,          # No left margin
-                                'translateY': 6309360,    # Directly below 6.9" image
+                                'translateY': 4594860,    # Directly below 5.025" image
                                 'unit': 'EMU'
                             }
                         }
@@ -399,6 +401,7 @@ class SocksStudioSlidesCreator:
 
                 # Add link to Socks-studio (right side, aligned with caption)
                 # Position X: 7.5" (right of caption box) = 6858000 EMU
+                # Position Y: 5.025" (aligned with caption) = 4594860 EMU
                 # Width: 2.5" (remaining space to right edge at 10")
                 # Height: 0.6" = 548640 EMU
                 link_id = f'link_{idx}'
@@ -416,7 +419,7 @@ class SocksStudioSlidesCreator:
                                 'scaleX': 1,
                                 'scaleY': 1,
                                 'translateX': 6858000,  # 7.5" from left (after caption box)
-                                'translateY': 6309360,  # Align with caption
+                                'translateY': 4594860,  # Align with caption
                                 'unit': 'EMU'
                             }
                         }
