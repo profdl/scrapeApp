@@ -351,11 +351,13 @@ Article text excerpt:
 {article_text}
 
 Please extract:
-1. The year or date when the artwork/project was created (not when the article was published)
-2. The medium or type of work (e.g., "Photography", "Architecture", "Drawing", "Installation", etc.)
-3. 3-5 keywords or tags that describe the main topics/themes (e.g., "urban landscape", "abstract geometry", "vernacular architecture")
+1. The artist/creator name (the person whose work is featured, NOT the article author)
+2. The year or date when the artwork/project was created (not when the article was published)
+3. The medium or type of work (e.g., "Photography", "Architecture", "Drawing", "Installation", etc.)
+4. 3-5 keywords or tags that describe the main topics/themes (e.g., "urban landscape", "abstract geometry", "vernacular architecture")
 
 Respond in this exact format:
+Artist: [artist/creator name or "Unknown" if not found]
 Year: [year or "Unknown" if not found]
 Medium: [medium or "Unknown" if not found]
 Keywords: [comma-separated keywords, or "Unknown" if not found]
@@ -367,6 +369,11 @@ Only include information that is explicitly stated in the text. Be concise."""
             # Parse response
             response_text = message.content[0].text
             result = {}
+
+            # Extract artist
+            artist_match = re.search(r'Artist:\s*(.+?)(?:\n|$)', response_text)
+            if artist_match and artist_match.group(1).strip() not in ['Unknown', 'unknown']:
+                result['author'] = artist_match.group(1).strip()
 
             # Extract year
             year_match = re.search(r'Year:\s*(\d{4}|Unknown)', response_text)
@@ -440,12 +447,8 @@ Only include information that is explicitly stated in the text. Be concise."""
             if title_tag:
                 metadata['title'] = title_tag.get_text(strip=True)
 
-        if metadata['author'] == 'Unknown':
-            author_links = soup.find_all('a', href=True)
-            for link in author_links:
-                if 'author' in link.get('href', ''):
-                    metadata['author'] = link.get_text(strip=True)
-                    break
+        # Don't extract blog post author - we want the artist/creator name instead
+        # which will be extracted by LLM
 
         # Find images
         images = []
@@ -497,11 +500,14 @@ Only include information that is explicitly stated in the text. Be concise."""
 
         print(f"Found {len(images)} images")
 
-        # Enhance metadata with LLM if year, medium is missing, or to extract keywords
-        if self.anthropic_client and (metadata['year'] == 'Unknown' or metadata['medium'] == 'Unknown' or 'keywords' not in metadata):
+        # Enhance metadata with LLM if author, year, medium is missing, or to extract keywords
+        if self.anthropic_client and (metadata['author'] == 'Unknown' or metadata['year'] == 'Unknown' or metadata['medium'] == 'Unknown' or 'keywords' not in metadata):
             print("  Enhancing metadata with LLM...")
             enhanced_metadata = self.enhance_metadata_with_llm(soup, metadata)
             if enhanced_metadata:
+                if metadata['author'] == 'Unknown' and enhanced_metadata.get('author'):
+                    metadata['author'] = enhanced_metadata['author']
+                    print(f"    Found artist: {metadata['author']}")
                 if metadata['year'] == 'Unknown' and enhanced_metadata.get('year'):
                     metadata['year'] = enhanced_metadata['year']
                     print(f"    Found year: {metadata['year']}")
