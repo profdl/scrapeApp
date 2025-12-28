@@ -399,6 +399,17 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
+                # Align caption text to bottom of text box
+                requests_list.append({
+                    'updateShapeProperties': {
+                        'objectId': textbox_id,
+                        'fields': 'contentAlignment',
+                        'shapeProperties': {
+                            'contentAlignment': 'BOTTOM'
+                        }
+                    }
+                })
+
                 # Add link to Socks-studio (right side, aligned with caption)
                 # Position X: 7.5" (right of caption box) = 6858000 EMU
                 # Position Y: 5.025" (aligned with caption) = 4594860 EMU
@@ -433,7 +444,7 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
-                # Style and add hyperlink (9pt font, light blue on black)
+                # Style and add hyperlink (9pt font, dark gray on black)
                 requests_list.append({
                     'updateTextStyle': {
                         'objectId': link_id,
@@ -449,9 +460,9 @@ class SocksStudioSlidesCreator:
                             'foregroundColor': {
                                 'opaqueColor': {
                                     'rgbColor': {
-                                        'red': 0.5,
-                                        'green': 0.7,
-                                        'blue': 1.0
+                                        'red': 0.6,
+                                        'green': 0.6,
+                                        'blue': 0.6
                                     }
                                 }
                             }
@@ -469,6 +480,17 @@ class SocksStudioSlidesCreator:
                             'alignment': 'END'
                         },
                         'textRange': {'type': 'ALL'}
+                    }
+                })
+
+                # Align link text to bottom of text box
+                requests_list.append({
+                    'updateShapeProperties': {
+                        'objectId': link_id,
+                        'fields': 'contentAlignment',
+                        'shapeProperties': {
+                            'contentAlignment': 'BOTTOM'
+                        }
                     }
                 })
 
