@@ -486,6 +486,15 @@ Only include information that is explicitly stated in the text. Be concise."""
 
                     images.append(img_url)
 
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_images = []
+        for img in images:
+            if img not in seen:
+                seen.add(img)
+                unique_images.append(img)
+        images = unique_images
+
         print(f"Found {len(images)} images")
 
         # Enhance metadata with LLM if year, medium is missing, or to extract keywords
