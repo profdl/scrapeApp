@@ -274,10 +274,32 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
-                # Add image (fills space above caption with margins)
-                # Standard slide: 10" x 7.5" (9144000 x 6858000 EMU)
-                # Reserve 0.75" at bottom for caption
-                # Image area: 9.5" x 6.5" with 0.25" margins
+                # Set black background
+                requests_list.append({
+                    'updatePageProperties': {
+                        'objectId': slide_id,
+                        'fields': 'pageBackgroundFill',
+                        'pageProperties': {
+                            'pageBackgroundFill': {
+                                'solidFill': {
+                                    'color': {
+                                        'rgbColor': {
+                                            'red': 0.0,
+                                            'green': 0.0,
+                                            'blue': 0.0
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                })
+
+                # Add image centered in a square area
+                # Slide: 10" x 7.5" (9144000 x 6858000 EMU)
+                # Reserve 0.6" at bottom for caption
+                # Image area: centered square of 6.9" x 6.9" (6287160 x 6287160 EMU)
+                # Centered horizontally: (10" - 6.9") / 2 = 1.55" = 1411020 EMU
                 image_id = f'image_{idx}'
                 requests_list.append({
                     'createImage': {
@@ -286,14 +308,14 @@ class SocksStudioSlidesCreator:
                         'elementProperties': {
                             'pageObjectId': slide_id,
                             'size': {
-                                'width': {'magnitude': 9144000, 'unit': 'EMU'},   # Full width (10")
-                                'height': {'magnitude': 6096000, 'unit': 'EMU'}  # 6.33" (leaves 1.17" for caption)
+                                'width': {'magnitude': 6287160, 'unit': 'EMU'},   # 6.9" square
+                                'height': {'magnitude': 6287160, 'unit': 'EMU'}   # 6.9" square
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
-                                'translateX': 0,      # Align left
-                                'translateY': 0,      # Align top
+                                'translateX': 1428480,  # Center horizontally
+                                'translateY': 0,        # Top aligned
                                 'unit': 'EMU'
                             }
                         }
@@ -319,8 +341,8 @@ class SocksStudioSlidesCreator:
 
                 caption_text = '\n'.join(caption_parts) if caption_parts else 'Untitled'
 
-                # Caption box at bottom: 1.17" height (1064880 EMU)
-                # Position Y: 6858000 - 1064880 = 5793120 EMU
+                # Caption box aligned to bottom: 0.6" height (546480 EMU)
+                # Position Y: 7.5" - 0.6" = 6.9" = 6287160 EMU
                 requests_list.append({
                     'createShape': {
                         'objectId': textbox_id,
@@ -329,13 +351,13 @@ class SocksStudioSlidesCreator:
                             'pageObjectId': slide_id,
                             'size': {
                                 'width': {'magnitude': 7920000, 'unit': 'EMU'},   # 8.25" (leave room for link)
-                                'height': {'magnitude': 1064880, 'unit': 'EMU'}  # 1.1"
+                                'height': {'magnitude': 546480, 'unit': 'EMU'}    # 0.6"
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
-                                'translateX': 288000,    # 0.3" from left
-                                'translateY': 6096000,   # Start at bottom of image
+                                'translateX': 288000,     # 0.3" from left
+                                'translateY': 6311520,    # Aligned to bottom (7.5" - 0.6")
                                 'unit': 'EMU'
                             }
                         }
@@ -350,7 +372,7 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
-                # Style the caption text (9pt font)
+                # Style the caption text (9pt font, light gray on black)
                 requests_list.append({
                     'updateTextStyle': {
                         'objectId': textbox_id,
@@ -363,9 +385,9 @@ class SocksStudioSlidesCreator:
                             'foregroundColor': {
                                 'opaqueColor': {
                                     'rgbColor': {
-                                        'red': 0.2,
-                                        'green': 0.2,
-                                        'blue': 0.2
+                                        'red': 0.85,
+                                        'green': 0.85,
+                                        'blue': 0.85
                                     }
                                 }
                             }
@@ -384,13 +406,13 @@ class SocksStudioSlidesCreator:
                             'pageObjectId': slide_id,
                             'size': {
                                 'width': {'magnitude': 1296000, 'unit': 'EMU'},   # 1.35"
-                                'height': {'magnitude': 1064880, 'unit': 'EMU'}   # Match caption height
+                                'height': {'magnitude': 546480, 'unit': 'EMU'}    # Match caption height (0.6")
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
                                 'translateX': 7848000,  # 8.65" from left (right edge - 1.35")
-                                'translateY': 6096000,  # Align with caption
+                                'translateY': 6311520,  # Align with caption
                                 'unit': 'EMU'
                             }
                         }
@@ -404,7 +426,7 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
-                # Style and add hyperlink (9pt font)
+                # Style and add hyperlink (9pt font, light blue on black)
                 requests_list.append({
                     'updateTextStyle': {
                         'objectId': link_id,
@@ -420,9 +442,9 @@ class SocksStudioSlidesCreator:
                             'foregroundColor': {
                                 'opaqueColor': {
                                     'rgbColor': {
-                                        'red': 0.26,
-                                        'green': 0.52,
-                                        'blue': 0.96
+                                        'red': 0.5,
+                                        'green': 0.7,
+                                        'blue': 1.0
                                     }
                                 }
                             }
@@ -431,7 +453,7 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
-                # Right-align and vertically align the link text
+                # Right-align the link text
                 requests_list.append({
                     'updateParagraphStyle': {
                         'objectId': link_id,
