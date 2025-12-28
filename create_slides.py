@@ -444,6 +444,77 @@ class SocksStudioSlidesCreator:
         print(f"{'='*60}")
 
 
+    def run_batch(self, count=1):
+        """Run in batch mode - process N articles without prompting"""
+        print("="*60)
+        print("Socks Studio → Google Slides Creator (Batch Mode)")
+        print("="*60)
+
+        # Authenticate
+        self.authenticate()
+
+        # Get article URLs (most recent first)
+        print("\nFetching article list...")
+        article_urls = self.get_article_urls(limit=count)
+        print(f"Will process {len(article_urls)} article(s)")
+
+        # Process articles
+        created_presentations = []
+        for i, article_url in enumerate(article_urls, 1):
+            print(f"\n{'='*60}")
+            print(f"Article {i}/{len(article_urls)}")
+            print(f"{'='*60}")
+
+            # Extract article data
+            article_data = self.extract_article_data(article_url)
+
+            if not article_data or not article_data['images']:
+                print("Skipping (no valid images)")
+                continue
+
+            # Create presentation
+            presentation_id = self.create_presentation(article_data)
+
+            if presentation_id:
+                presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}"
+                created_presentations.append({
+                    'title': article_data['metadata']['title'],
+                    'url': presentation_url,
+                    'slides': len(article_data['images'])
+                })
+                print(f"\n{'='*60}")
+                print("Presentation created successfully!")
+                print(f"View at: {presentation_url}")
+                print(f"{'='*60}")
+            else:
+                print("Failed to create presentation")
+
+            time.sleep(1)  # Be respectful to APIs
+
+        # Summary
+        print(f"\n{'='*60}")
+        print(f"Batch Complete! Created {len(created_presentations)} presentation(s)")
+        print(f"{'='*60}")
+        for i, pres in enumerate(created_presentations, 1):
+            print(f"{i}. {pres['title']} ({pres['slides']} slides)")
+            print(f"   {pres['url']}")
+        print(f"{'='*60}")
+
+
 if __name__ == "__main__":
+    import sys
+
     creator = SocksStudioSlidesCreator()
-    creator.run_interactive()
+
+    # Check for command-line arguments
+    if len(sys.argv) > 1:
+        try:
+            count = int(sys.argv[1])
+            creator.run_batch(count=count)
+        except ValueError:
+            print("Usage: python create_slides.py [number_of_articles]")
+            print("Example: python create_slides.py 5")
+            sys.exit(1)
+    else:
+        # Default to batch mode with 1 article
+        creator.run_batch(count=1)
