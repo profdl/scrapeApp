@@ -16,5 +16,8 @@ token.pickle
 # Anthropic API key
 anthropic_api_key.txt
 
+# Tracking file
+processed_articles.json
+
 # OS files
 .DS_Store

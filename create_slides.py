@@ -13,6 +13,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from pathlib import Path
 from anthropic import Anthropic
+import json
+from datetime import datetime
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -23,7 +25,8 @@ import pickle
 
 # Google API scopes
 SCOPES = ['https://www.googleapis.com/auth/presentations',
-          'https://www.googleapis.com/auth/drive']
+          'https://www.googleapis.com/auth/drive',
+          'https://www.googleapis.com/auth/spreadsheets']
 
 class SocksStudioSlidesCreator:
     def __init__(self):
@@ -34,10 +37,13 @@ class SocksStudioSlidesCreator:
         })
         self.slides_service = None
         self.drive_service = None
+        self.sheets_service = None
         self.credentials_path = Path('credentials.json')
         self.token_path = Path('token.pickle')
         self.anthropic_key_path = Path('anthropic_api_key.txt')
+        self.tracking_file = Path('processed_articles.json')
         self.drive_folder_id = None  # Will be set after authentication
+        self.catalog_sheet_id = None  # Will be set after creating/finding catalog
 
         # Initialize Anthropic client for metadata enhancement
         # Try to read from file first, then fall back to environment variable
@@ -91,6 +97,7 @@ class SocksStudioSlidesCreator:
         # Build services
         self.slides_service = build('slides', 'v1', credentials=creds)
         self.drive_service = build('drive', 'v3', credentials=creds)
+        self.sheets_service = build('sheets', 'v4', credentials=creds)
         print("✓ Authentication successful!")
 
     def get_or_create_drive_folder(self, folder_name='socks-studio'):
@@ -142,6 +149,138 @@ class SocksStudioSlidesCreator:
             fields='id, parents'
         ).execute()
 
+    def load_processed_articles(self):
+        """Load the tracking file of processed articles"""
+        if self.tracking_file.exists():
+            with open(self.tracking_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        return {}
+
+    def save_processed_article(self, article_url, presentation_data):
+        """Save a processed article to the tracking file"""
+        processed = self.load_processed_articles()
+        processed[article_url] = {
+            'presentation_id': presentation_data['presentation_id'],
+            'presentation_url': presentation_data['presentation_url'],
+            'title': presentation_data['title'],
+            'author': presentation_data.get('author', 'Unknown'),
+            'year': presentation_data.get('year', 'Unknown'),
+            'medium': presentation_data.get('medium', 'Unknown'),
+            'keywords': presentation_data.get('keywords', ''),
+            'slide_count': presentation_data['slide_count'],
+            'processed_date': datetime.now().isoformat()
+        }
+        with open(self.tracking_file, 'w', encoding='utf-8') as f:
+            json.dump(processed, f, indent=2, ensure_ascii=False)
+
+    def is_article_processed(self, article_url):
+        """Check if an article has already been processed"""
+        processed = self.load_processed_articles()
+        return article_url in processed
+
+    def get_or_create_catalog_sheet(self):
+        """Get or create a Google Sheets catalog for all presentations"""
+        # Search for existing catalog
+        query = "name='Socks Studio Presentations Catalog' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false"
+        results = self.drive_service.files().list(
+            q=query,
+            spaces='drive',
+            fields='files(id, name)'
+        ).execute()
+
+        sheets = results.get('files', [])
+
+        if sheets:
+            sheet_id = sheets[0]['id']
+            print(f"✓ Found existing catalog spreadsheet (ID: {sheet_id})")
+            self.catalog_sheet_id = sheet_id
+            return sheet_id
+        else:
+            # Create new spreadsheet
+            spreadsheet = {
+                'properties': {
+                    'title': 'Socks Studio Presentations Catalog'
+                },
+                'sheets': [{
+                    'properties': {
+                        'title': 'Presentations',
+                        'gridProperties': {
+                            'frozenRowCount': 1
+                        }
+                    }
+                }]
+            }
+            spreadsheet = self.sheets_service.spreadsheets().create(
+                body=spreadsheet,
+                fields='spreadsheetId'
+            ).execute()
+            sheet_id = spreadsheet['spreadsheetId']
+
+            # Move to socks-studio folder
+            if self.drive_folder_id:
+                self.move_presentation_to_folder(sheet_id, self.drive_folder_id)
+
+            # Add headers
+            headers = [['Article URL', 'Presentation URL', 'Title', 'Author', 'Year', 'Medium', 'Keywords', 'Slides', 'Processed Date']]
+            self.sheets_service.spreadsheets().values().update(
+                spreadsheetId=sheet_id,
+                range='Presentations!A1:I1',
+                valueInputOption='RAW',
+                body={'values': headers}
+            ).execute()
+
+            # Format headers
+            requests = [{
+                'repeatCell': {
+                    'range': {
+                        'sheetId': 0,
+                        'startRowIndex': 0,
+                        'endRowIndex': 1
+                    },
+                    'cell': {
+                        'userEnteredFormat': {
+                            'backgroundColor': {'red': 0.2, 'green': 0.2, 'blue': 0.2},
+                            'textFormat': {'bold': True, 'foregroundColor': {'red': 1, 'green': 1, 'blue': 1}}
+                        }
+                    },
+                    'fields': 'userEnteredFormat(backgroundColor,textFormat)'
+                }
+            }]
+            self.sheets_service.spreadsheets().batchUpdate(
+                spreadsheetId=sheet_id,
+                body={'requests': requests}
+            ).execute()
+
+            print(f"✓ Created new catalog spreadsheet (ID: {sheet_id})")
+
+        self.catalog_sheet_id = sheet_id
+        return sheet_id
+
+    def add_to_catalog(self, article_url, presentation_data):
+        """Add a presentation entry to the catalog spreadsheet"""
+        if not self.catalog_sheet_id:
+            return
+
+        row = [[
+            article_url,
+            presentation_data['presentation_url'],
+            presentation_data['title'],
+            presentation_data.get('author', 'Unknown'),
+            presentation_data.get('year', 'Unknown'),
+            presentation_data.get('medium', 'Unknown'),
+            presentation_data.get('keywords', ''),
+            str(presentation_data['slide_count']),
+            presentation_data.get('processed_date', datetime.now().isoformat())
+        ]]
+
+        self.sheets_service.spreadsheets().values().append(
+            spreadsheetId=self.catalog_sheet_id,
+            range='Presentations!A:I',
+            valueInputOption='RAW',
+            insertDataOption='INSERT_ROWS',
+            body={'values': row}
+        ).execute()
+
     def get_article_urls(self, limit=None):
         """Get article URLs from the homepage (most recent first)"""
         print("Fetching article URLs...")
@@ -187,7 +326,7 @@ class SocksStudioSlidesCreator:
         return article_urls
 
     def enhance_metadata_with_llm(self, soup, existing_metadata):
-        """Use Claude to extract missing date/medium from article text"""
+        """Use Claude to extract missing date/medium and keywords from article text"""
         if not self.anthropic_client:
             return None
 
@@ -202,7 +341,7 @@ class SocksStudioSlidesCreator:
         try:
             message = self.anthropic_client.messages.create(
                 model="claude-3-5-haiku-20241022",
-                max_tokens=200,
+                max_tokens=300,
                 messages=[{
                     "role": "user",
                     "content": f"""Read this article excerpt and extract information about the artwork/project discussed.
@@ -214,10 +353,12 @@ Article text excerpt:
 Please extract:
 1. The year or date when the artwork/project was created (not when the article was published)
 2. The medium or type of work (e.g., "Photography", "Architecture", "Drawing", "Installation", etc.)
+3. 3-5 keywords or tags that describe the main topics/themes (e.g., "urban landscape", "abstract geometry", "vernacular architecture")
 
 Respond in this exact format:
 Year: [year or "Unknown" if not found]
 Medium: [medium or "Unknown" if not found]
+Keywords: [comma-separated keywords, or "Unknown" if not found]
 
 Only include information that is explicitly stated in the text. Be concise."""
                 }]
@@ -236,6 +377,11 @@ Only include information that is explicitly stated in the text. Be concise."""
             medium_match = re.search(r'Medium:\s*(.+?)(?:\n|$)', response_text)
             if medium_match and medium_match.group(1).strip() != 'Unknown':
                 result['medium'] = medium_match.group(1).strip()
+
+            # Extract keywords
+            keywords_match = re.search(r'Keywords:\s*(.+?)(?:\n|$)', response_text, re.IGNORECASE)
+            if keywords_match and keywords_match.group(1).strip() not in ['Unknown', 'unknown']:
+                result['keywords'] = keywords_match.group(1).strip()
 
             return result
 
@@ -341,8 +487,8 @@ Only include information that is explicitly stated in the text. Be concise."""
 
         print(f"Found {len(images)} images")
 
-        # Enhance metadata with LLM if year or medium is missing
-        if (metadata['year'] == 'Unknown' or metadata['medium'] == 'Unknown') and self.anthropic_client:
+        # Enhance metadata with LLM if year, medium is missing, or to extract keywords
+        if self.anthropic_client and (metadata['year'] == 'Unknown' or metadata['medium'] == 'Unknown' or 'keywords' not in metadata):
             print("  Enhancing metadata with LLM...")
             enhanced_metadata = self.enhance_metadata_with_llm(soup, metadata)
             if enhanced_metadata:
@@ -352,6 +498,9 @@ Only include information that is explicitly stated in the text. Be concise."""
                 if metadata['medium'] == 'Unknown' and enhanced_metadata.get('medium'):
                     metadata['medium'] = enhanced_metadata['medium']
                     print(f"    Found medium: {metadata['medium']}")
+                if enhanced_metadata.get('keywords'):
+                    metadata['keywords'] = enhanced_metadata['keywords']
+                    print(f"    Found keywords: {metadata['keywords']}")
 
         return {
             'metadata': metadata,
@@ -712,13 +861,30 @@ Only include information that is explicitly stated in the text. Be concise."""
         folder_url = f"https://drive.google.com/drive/folders/{folder_id}"
         print(f"Folder URL: {folder_url}")
 
+        # Get or create catalog spreadsheet
+        print("\nSetting up catalog spreadsheet...")
+        catalog_sheet_id = self.get_or_create_catalog_sheet()
+        catalog_url = f"https://docs.google.com/spreadsheets/d/{catalog_sheet_id}"
+        print(f"Catalog URL: {catalog_url}")
+
         # Get article URLs (most recent first)
         print("\nFetching article list...")
-        article_urls = self.get_article_urls(limit=count)
-        print(f"Will process {len(article_urls)} article(s)")
+        all_article_urls = self.get_article_urls(limit=None)  # Get all to check processed
+
+        # Filter out already processed articles
+        unprocessed_urls = [url for url in all_article_urls if not self.is_article_processed(url)]
+
+        # Limit to requested count
+        article_urls = unprocessed_urls[:count] if count else unprocessed_urls
+
+        already_processed_count = len(all_article_urls) - len(unprocessed_urls)
+        print(f"Total articles: {len(all_article_urls)}")
+        print(f"Already processed: {already_processed_count}")
+        print(f"Will process: {len(article_urls)} new article(s)")
 
         # Process articles
         created_presentations = []
+        skipped_count = 0
         for i, article_url in enumerate(article_urls, 1):
             print(f"\n{'='*60}")
             print(f"Article {i}/{len(article_urls)}")
@@ -729,6 +895,7 @@ Only include information that is explicitly stated in the text. Be concise."""
 
             if not article_data or not article_data['images']:
                 print("Skipping (no valid images)")
+                skipped_count += 1
                 continue
 
             # Create presentation
@@ -740,10 +907,33 @@ Only include information that is explicitly stated in the text. Be concise."""
                 self.move_presentation_to_folder(presentation_id, folder_id)
 
                 presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}"
+
+                # Prepare presentation data for tracking/catalog
+                presentation_data = {
+                    'presentation_id': presentation_id,
+                    'presentation_url': presentation_url,
+                    'title': article_data['metadata']['title'],
+                    'author': article_data['metadata'].get('author', 'Unknown'),
+                    'year': article_data['metadata'].get('year', 'Unknown'),
+                    'medium': article_data['metadata'].get('medium', 'Unknown'),
+                    'keywords': article_data['metadata'].get('keywords', ''),
+                    'slide_count': len(article_data['images']),
+                    'processed_date': datetime.now().isoformat()
+                }
+
+                # Save to tracking file
+                print("  Saving to tracking file...")
+                self.save_processed_article(article_url, presentation_data)
+
+                # Add to catalog spreadsheet
+                print("  Adding to catalog spreadsheet...")
+                self.add_to_catalog(article_url, presentation_data)
+
                 created_presentations.append({
                     'title': article_data['metadata']['title'],
                     'url': presentation_url,
-                    'slides': len(article_data['images'])
+                    'slides': len(article_data['images']),
+                    'keywords': article_data['metadata'].get('keywords', '')
                 })
                 print(f"\n{'='*60}")
                 print("Presentation created successfully!")
@@ -751,18 +941,26 @@ Only include information that is explicitly stated in the text. Be concise."""
                 print(f"{'='*60}")
             else:
                 print("Failed to create presentation")
+                skipped_count += 1
 
             time.sleep(1)  # Be respectful to APIs
 
         # Summary
         print(f"\n{'='*60}")
-        print(f"Batch Complete! Created {len(created_presentations)} presentation(s)")
+        print(f"Batch Complete!")
+        print(f"{'='*60}")
+        print(f"Created: {len(created_presentations)} presentation(s)")
+        print(f"Skipped: {skipped_count} article(s)")
         print(f"{'='*60}")
         print(f"All presentations saved to folder:")
         print(f"  {folder_url}")
+        print(f"")
+        print(f"Catalog spreadsheet:")
+        print(f"  {catalog_url}")
         print(f"{'='*60}")
         for i, pres in enumerate(created_presentations, 1):
-            print(f"{i}. {pres['title']} ({pres['slides']} slides)")
+            keywords_str = f" | Keywords: {pres['keywords']}" if pres.get('keywords') else ""
+            print(f"{i}. {pres['title']} ({pres['slides']} slides){keywords_str}")
             print(f"   {pres['url']}")
         print(f"{'='*60}")
 
