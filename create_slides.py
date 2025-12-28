@@ -12,6 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 from pathlib import Path
+from anthropic import Anthropic
 
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -35,6 +36,10 @@ class SocksStudioSlidesCreator:
         self.drive_service = None
         self.credentials_path = Path('credentials.json')
         self.token_path = Path('token.pickle')
+
+        # Initialize Anthropic client for metadata enhancement
+        api_key = os.environ.get('ANTHROPIC_API_KEY')
+        self.anthropic_client = Anthropic(api_key=api_key) if api_key else None
 
     def authenticate(self):
         """Authenticate with Google API"""
@@ -123,6 +128,63 @@ class SocksStudioSlidesCreator:
             time.sleep(0.5)
 
         return article_urls
+
+    def enhance_metadata_with_llm(self, soup, existing_metadata):
+        """Use Claude to extract missing date/medium from article text"""
+        if not self.anthropic_client:
+            return None
+
+        # Extract article text
+        content_div = soup.find('article') or soup.find('div', class_='entry-content') or soup.body
+        if not content_div:
+            return None
+
+        # Get text content (limit to first 3000 chars to stay within reasonable token limits)
+        article_text = content_div.get_text(separator='\n', strip=True)[:3000]
+
+        try:
+            message = self.anthropic_client.messages.create(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=200,
+                messages=[{
+                    "role": "user",
+                    "content": f"""Read this article excerpt and extract information about the artwork/project discussed.
+
+Article title: {existing_metadata['title']}
+Article text excerpt:
+{article_text}
+
+Please extract:
+1. The year or date when the artwork/project was created (not when the article was published)
+2. The medium or type of work (e.g., "Photography", "Architecture", "Drawing", "Installation", etc.)
+
+Respond in this exact format:
+Year: [year or "Unknown" if not found]
+Medium: [medium or "Unknown" if not found]
+
+Only include information that is explicitly stated in the text. Be concise."""
+                }]
+            )
+
+            # Parse response
+            response_text = message.content[0].text
+            result = {}
+
+            # Extract year
+            year_match = re.search(r'Year:\s*(\d{4}|Unknown)', response_text)
+            if year_match and year_match.group(1) != 'Unknown':
+                result['year'] = year_match.group(1)
+
+            # Extract medium
+            medium_match = re.search(r'Medium:\s*(.+?)(?:\n|$)', response_text)
+            if medium_match and medium_match.group(1).strip() != 'Unknown':
+                result['medium'] = medium_match.group(1).strip()
+
+            return result
+
+        except Exception as e:
+            print(f"    LLM enhancement failed: {e}")
+            return None
 
     def extract_article_data(self, url):
         """Extract metadata and images from an article"""
@@ -221,6 +283,18 @@ class SocksStudioSlidesCreator:
                     images.append(img_url)
 
         print(f"Found {len(images)} images")
+
+        # Enhance metadata with LLM if year or medium is missing
+        if (metadata['year'] == 'Unknown' or metadata['medium'] == 'Unknown') and self.anthropic_client:
+            print("  Enhancing metadata with LLM...")
+            enhanced_metadata = self.enhance_metadata_with_llm(soup, metadata)
+            if enhanced_metadata:
+                if metadata['year'] == 'Unknown' and enhanced_metadata.get('year'):
+                    metadata['year'] = enhanced_metadata['year']
+                    print(f"    Found year: {metadata['year']}")
+                if metadata['medium'] == 'Unknown' and enhanced_metadata.get('medium'):
+                    metadata['medium'] = enhanced_metadata['medium']
+                    print(f"    Found medium: {metadata['medium']}")
 
         return {
             'metadata': metadata,
