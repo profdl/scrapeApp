@@ -297,8 +297,8 @@ class SocksStudioSlidesCreator:
 
                 # Add image centered at top (no spacing)
                 # Slide: 10" x 7.5" (9144000 x 6858000 EMU)
-                # Image: 6.9" x 6.9" square (6306960 x 6306960 EMU)
-                # Centered horizontally: (10" - 6.9") / 2 = 1.55" = 1417020 EMU
+                # Image constrained in 6.9" x 6.9" square (6309360 x 6309360 EMU)
+                # Centered horizontally: (10" - 6.9") / 2 = 1.55" = 1417320 EMU
                 image_id = f'image_{idx}'
                 requests_list.append({
                     'createImage': {
@@ -307,13 +307,13 @@ class SocksStudioSlidesCreator:
                         'elementProperties': {
                             'pageObjectId': slide_id,
                             'size': {
-                                'width': {'magnitude': 6306960, 'unit': 'EMU'},   # 6.9" square
-                                'height': {'magnitude': 6306960, 'unit': 'EMU'}   # 6.9" square
+                                'width': {'magnitude': 6309360, 'unit': 'EMU'},   # 6.9" square constraint
+                                'height': {'magnitude': 6309360, 'unit': 'EMU'}   # 6.9" square constraint
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
-                                'translateX': 1417020,  # Center horizontally
+                                'translateX': 1417320,  # Center horizontally
                                 'translateY': 0,        # Top of slide (no spacing)
                                 'unit': 'EMU'
                             }
@@ -341,9 +341,9 @@ class SocksStudioSlidesCreator:
                 caption_text = '\n'.join(caption_parts) if caption_parts else 'Untitled'
 
                 # Caption box directly below image (no spacing)
-                # Position Y: 6.9" (directly after image)
+                # Position Y: 6.9" (directly after image) = 6309360 EMU
                 # Width: 7.5" (leave room for link on right)
-                # Height: 0.6" (551040 EMU)
+                # Height: 0.6" (548640 EMU)
                 requests_list.append({
                     'createShape': {
                         'objectId': textbox_id,
@@ -352,13 +352,13 @@ class SocksStudioSlidesCreator:
                             'pageObjectId': slide_id,
                             'size': {
                                 'width': {'magnitude': 6858000, 'unit': 'EMU'},   # 7.5" (leave room for link)
-                                'height': {'magnitude': 551040, 'unit': 'EMU'}    # 0.6"
+                                'height': {'magnitude': 548640, 'unit': 'EMU'}    # 0.6"
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
                                 'translateX': 0,          # No left margin
-                                'translateY': 6306960,    # Directly below 6.9" image
+                                'translateY': 6309360,    # Directly below 6.9" image
                                 'unit': 'EMU'
                             }
                         }
@@ -398,8 +398,9 @@ class SocksStudioSlidesCreator:
                 })
 
                 # Add link to Socks-studio (right side, aligned with caption)
-                # Position X: 7.5" (right of caption box)
+                # Position X: 7.5" (right of caption box) = 6858000 EMU
                 # Width: 2.5" (remaining space to right edge at 10")
+                # Height: 0.6" = 548640 EMU
                 link_id = f'link_{idx}'
                 requests_list.append({
                     'createShape': {
@@ -409,13 +410,13 @@ class SocksStudioSlidesCreator:
                             'pageObjectId': slide_id,
                             'size': {
                                 'width': {'magnitude': 2286000, 'unit': 'EMU'},   # 2.5"
-                                'height': {'magnitude': 551040, 'unit': 'EMU'}    # Match caption height (0.6")
+                                'height': {'magnitude': 548640, 'unit': 'EMU'}    # Match caption height (0.6")
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
                                 'translateX': 6858000,  # 7.5" from left (after caption box)
-                                'translateY': 6306960,  # Align with caption
+                                'translateY': 6309360,  # Align with caption
                                 'unit': 'EMU'
                             }
                         }
