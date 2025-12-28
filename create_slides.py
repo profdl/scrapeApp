@@ -274,7 +274,10 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
-                # Add image (fills most of the slide)
+                # Add image (fills space above caption with margins)
+                # Standard slide: 10" x 7.5" (9144000 x 6858000 EMU)
+                # Reserve 0.75" at bottom for caption
+                # Image area: 9.5" x 6.5" with 0.25" margins
                 image_id = f'image_{idx}'
                 requests_list.append({
                     'createImage': {
@@ -283,24 +286,41 @@ class SocksStudioSlidesCreator:
                         'elementProperties': {
                             'pageObjectId': slide_id,
                             'size': {
-                                'width': {'magnitude': 9000000, 'unit': 'EMU'},  # ~9.4 inches
-                                'height': {'magnitude': 6750000, 'unit': 'EMU'}  # ~7 inches
+                                'width': {'magnitude': 9144000, 'unit': 'EMU'},   # Full width (10")
+                                'height': {'magnitude': 6096000, 'unit': 'EMU'}  # 6.33" (leaves 1.17" for caption)
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
-                                'translateX': 360000,  # 0.375 inches from left
-                                'translateY': 360000,  # 0.375 inches from top
+                                'translateX': 0,      # Align left
+                                'translateY': 0,      # Align top
                                 'unit': 'EMU'
                             }
                         }
                     }
                 })
 
-                # Add caption text box
+                # Add caption text box (aligned to bottom of slide)
                 textbox_id = f'textbox_{idx}'
-                caption_text = f"{metadata['author']}\n{metadata['title']}\n{metadata['medium']}\n{metadata['year']}"
+                caption_parts = []
+                if metadata['author'] and metadata['author'] != 'Unknown':
+                    caption_parts.append(metadata['author'])
+                if metadata['title'] and metadata['title'] != 'Unknown':
+                    caption_parts.append(metadata['title'])
 
+                # Combine medium and year on same line if both exist
+                meta_line = []
+                if metadata['medium'] and metadata['medium'] != 'Unknown':
+                    meta_line.append(metadata['medium'])
+                if metadata['year'] and metadata['year'] != 'Unknown':
+                    meta_line.append(metadata['year'])
+                if meta_line:
+                    caption_parts.append(', '.join(meta_line))
+
+                caption_text = '\n'.join(caption_parts) if caption_parts else 'Untitled'
+
+                # Caption box at bottom: 1.17" height (1064880 EMU)
+                # Position Y: 6858000 - 1064880 = 5793120 EMU
                 requests_list.append({
                     'createShape': {
                         'objectId': textbox_id,
@@ -308,14 +328,14 @@ class SocksStudioSlidesCreator:
                         'elementProperties': {
                             'pageObjectId': slide_id,
                             'size': {
-                                'width': {'magnitude': 9000000, 'unit': 'EMU'},
-                                'height': {'magnitude': 720000, 'unit': 'EMU'}  # ~0.75 inches
+                                'width': {'magnitude': 7920000, 'unit': 'EMU'},   # 8.25" (leave room for link)
+                                'height': {'magnitude': 1064880, 'unit': 'EMU'}  # 1.1"
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
-                                'translateX': 360000,
-                                'translateY': 6480000,  # Bottom of slide
+                                'translateX': 288000,    # 0.3" from left
+                                'translateY': 6096000,   # Start at bottom of image
                                 'unit': 'EMU'
                             }
                         }
@@ -330,7 +350,31 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
-                # Add link to Socks-studio
+                # Style the caption text (9pt font)
+                requests_list.append({
+                    'updateTextStyle': {
+                        'objectId': textbox_id,
+                        'fields': 'fontSize,foregroundColor',
+                        'style': {
+                            'fontSize': {
+                                'magnitude': 9,
+                                'unit': 'PT'
+                            },
+                            'foregroundColor': {
+                                'opaqueColor': {
+                                    'rgbColor': {
+                                        'red': 0.2,
+                                        'green': 0.2,
+                                        'blue': 0.2
+                                    }
+                                }
+                            }
+                        },
+                        'textRange': {'type': 'ALL'}
+                    }
+                })
+
+                # Add link to Socks-studio (bottom right, aligned with caption)
                 link_id = f'link_{idx}'
                 requests_list.append({
                     'createShape': {
@@ -339,14 +383,14 @@ class SocksStudioSlidesCreator:
                         'elementProperties': {
                             'pageObjectId': slide_id,
                             'size': {
-                                'width': {'magnitude': 1440000, 'unit': 'EMU'},
-                                'height': {'magnitude': 360000, 'unit': 'EMU'}
+                                'width': {'magnitude': 1296000, 'unit': 'EMU'},   # 1.35"
+                                'height': {'magnitude': 1064880, 'unit': 'EMU'}   # Match caption height
                             },
                             'transform': {
                                 'scaleX': 1,
                                 'scaleY': 1,
-                                'translateX': 360000,
-                                'translateY': 7200000,
+                                'translateX': 7848000,  # 8.65" from left (right edge - 1.35")
+                                'translateY': 6096000,  # Align with caption
                                 'unit': 'EMU'
                             }
                         }
@@ -360,15 +404,40 @@ class SocksStudioSlidesCreator:
                     }
                 })
 
-                # Add hyperlink
+                # Style and add hyperlink (9pt font)
                 requests_list.append({
                     'updateTextStyle': {
                         'objectId': link_id,
-                        'fields': 'link',
+                        'fields': 'link,fontSize,foregroundColor',
                         'style': {
                             'link': {
                                 'url': metadata['article_url']
+                            },
+                            'fontSize': {
+                                'magnitude': 9,
+                                'unit': 'PT'
+                            },
+                            'foregroundColor': {
+                                'opaqueColor': {
+                                    'rgbColor': {
+                                        'red': 0.26,
+                                        'green': 0.52,
+                                        'blue': 0.96
+                                    }
+                                }
                             }
+                        },
+                        'textRange': {'type': 'ALL'}
+                    }
+                })
+
+                # Right-align and vertically align the link text
+                requests_list.append({
+                    'updateParagraphStyle': {
+                        'objectId': link_id,
+                        'fields': 'alignment',
+                        'style': {
+                            'alignment': 'END'
                         },
                         'textRange': {'type': 'ALL'}
                     }
